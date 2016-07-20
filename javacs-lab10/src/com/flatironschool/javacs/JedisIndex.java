@@ -12,6 +12,7 @@ import java.util.List;
 import org.jsoup.select.Elements;
 
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.Response;
 import redis.clients.jedis.Transaction;
 
 /**
@@ -67,8 +68,7 @@ public class JedisIndex {
 	 * @return Set of URLs.
 	 */
 	public Set<String> getURLs(String term) {
-        // FILL THIS IN!
-		return null;
+		return jedis.smembers(urlSetKey(term));
 	}
 
     /**
@@ -78,8 +78,26 @@ public class JedisIndex {
 	 * @return Map from URL to count.
 	 */
 	public Map<String, Integer> getCounts(String term) {
-        // FILL THIS IN!
-		return null;
+		Map<String, Integer> countsMap = new HashMap<>();
+		Map<String, Response<String>> responseMap = new HashMap<>();
+		Set<String> urls = getURLs(term);
+		Transaction t = jedis.multi();
+		for (String url : urls) {
+			responseMap.put(url, t.hget(termCounterKey(url), term));
+		}
+		t.exec();
+		for (String url : responseMap.keySet()) {
+			countsMap.put(url, Integer.parseInt(responseMap.get(url).get()));
+		}
+		return countsMap;
+
+//		Map<String, Integer> countsMap = new HashMap<>();
+//		for (String url : getURLs(term)) {
+//			countsMap.put(url, getCount(url, term));
+//		}
+//
+//		return countsMap;
+
 	}
 
     /**
@@ -90,8 +108,7 @@ public class JedisIndex {
 	 * @return
 	 */
 	public Integer getCount(String url, String term) {
-        // FILL THIS IN!
-		return null;
+		return Integer.parseInt(jedis.hget(termCounterKey(url), term));
 	}
 
 
@@ -102,7 +119,24 @@ public class JedisIndex {
 	 * @param paragraphs  Collection of elements that should be indexed.
 	 */
 	public void indexPage(String url, Elements paragraphs) {
-        // FILL THIS IN!
+		TermCounter tc = new TermCounter(url);
+		tc.processElements(paragraphs);
+		termCounterToRedis(tc);
+	}
+
+	/**
+	 * Takes in a TermCounter object and adds it to jedis.
+	 * The url is added to each URLSet identified by a term in the url.
+	 * A Hashmap is created with key = url, which maps terms to frequency
+	 * @param tc TermCounter to add to jedis
+     */
+	private void termCounterToRedis(TermCounter tc) {
+		String url = tc.getLabel();
+		String tcKey = termCounterKey(url);
+		for (String term : tc.keySet()) {
+			jedis.hincrBy(tcKey, term, tc.get(term));
+			jedis.sadd(urlSetKey(term), url);
+		}
 	}
 
 	/**
@@ -223,9 +257,9 @@ public class JedisIndex {
 		Jedis jedis = JedisMaker.make();
 		JedisIndex index = new JedisIndex(jedis);
 		
-		//index.deleteTermCounters();
-		//index.deleteURLSets();
-		//index.deleteAllKeys();
+//		index.deleteTermCounters();
+//		index.deleteURLSets();
+//		index.deleteAllKeys();
 		loadIndex(index);
 		
 		Map<String, Integer> map = index.getCounts("the");
